@@ -185,8 +185,9 @@ window._loadTheme = theme => {
     document.fonts.add(lightFont);
     document.fonts.load("12px " + theme.cssvars.font_main_light);
 
-    if (theme.terminal.fontFamily === "Fira Mono") {
-        let termFont = new FontFace(theme.terminal.fontFamily, `url("${path.join(fontsDir, theme.terminal.fontFamily.toLowerCase().replace(/ /g, '_') + '.woff2').replace(/\\/g, '/')}")`);
+    const termFontPath = path.join(fontsDir, theme.terminal.fontFamily.toLowerCase().replace(/ /g, '_') + '.woff2');
+    if (fs.existsSync(termFontPath)) {
+        let termFont = new FontFace(theme.terminal.fontFamily, `url("${termFontPath.replace(/\\/g, '/')}")`);
         document.fonts.add(termFont);
         document.fonts.load("12px " + theme.terminal.fontFamily);
     }
