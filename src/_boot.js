@@ -206,6 +206,238 @@ if (typeof versionHistory[version] === "undefined") {
 }
 fs.writeFileSync(versionHistoryPath, JSON.stringify(versionHistory, 0, 2), {encoding:"utf-8"});
 
+// ============================================================
+// AgentWatch — AI agent log file watchers
+// ============================================================
+const os = require('os');
+const HOME = os.homedir();
+
+const AGENT_PATHS = {
+    claude: path.join(HOME, '.claude', 'projects'),
+    antigravity: path.join(HOME, '.gemini', 'antigravity-cli', 'brain'),
+    opencode: path.join(HOME, '.config', 'opencode'),
+    codex: path.join(HOME, '.codex')
+};
+
+// Context window sizes per model (tokens)
+const AW_CTX_WINDOWS = {
+    'claude-opus-4': 200000,
+    'claude-sonnet-4-5': 200000,
+    'claude-sonnet-4-6': 200000,
+    'claude-haiku-3-5': 200000,
+    'gpt-4o': 128000,
+    'gpt-4.1': 1000000,
+    'o3': 200000,
+    'gemini-2.5-flash': 1048576,
+    'gemini-2.5-pro': 1048576
+};
+
+// Cost per 1M tokens [inputCost, outputCost] in USD
+const AW_MODEL_COSTS = {
+    'claude-opus-4':     [15.00, 75.00],
+    'claude-sonnet-4-5': [3.00,  15.00],
+    'claude-sonnet-4-6': [3.00,  15.00],
+    'claude-haiku-3-5':  [0.80,  4.00],
+    'gpt-4o':            [5.00,  15.00],
+    'gpt-4.1':           [2.00,  8.00],
+    'gemini-2.5-flash':  [0.30,  2.50],
+    'gemini-2.5-pro':    [1.25,  10.00]
+};
+
+function awCalcCost(model, tokensIn, tokensOut) {
+    const costs = AW_MODEL_COSTS[model];
+    if (!costs) return 0;
+    return (tokensIn / 1e6) * costs[0] + (tokensOut / 1e6) * costs[1];
+}
+
+function awCtxPct(model, tokensIn) {
+    const ctx = AW_CTX_WINDOWS[model];
+    if (!ctx) return null;
+    return Math.min(100, Math.round((tokensIn / ctx) * 100));
+}
+
+let awSessions = {};
+let awDailyHistory = new Array(30).fill(0);
+
+function awBuildPayload() {
+    const sessions = Object.values(awSessions);
+    const dailyCostUsd = sessions.reduce((s, x) => s + (x.costUsd || 0), 0);
+    const totalTokens = sessions.reduce((s, x) => s + (x.tokensIn || 0) + (x.tokensOut || 0), 0);
+    return { sessions, dailyCostUsd, totalTokens, dailyHistory: awDailyHistory };
+}
+
+function awBroadcast() {
+    if (win && win.webContents && !win.webContents.isDestroyed()) {
+        win.webContents.send('agentwatch-update', awBuildPayload());
+    }
+}
+
+// --- Claude Code parser ---
+function awParseClaudeLog(filePath) {
+    try {
+        const lines = fs.readFileSync(filePath, 'utf-8').trim().split('\n').filter(Boolean);
+        let tokensIn = 0, tokensOut = 0, model = 'claude-sonnet-4-6', lastActivity = 0;
+        for (const line of lines) {
+            try {
+                const entry = JSON.parse(line);
+                if (entry.usage) {
+                    tokensIn += entry.usage.input_tokens || 0;
+                    tokensOut += entry.usage.output_tokens || 0;
+                }
+                if (entry.model) model = entry.model;
+                if (entry.timestamp) lastActivity = Math.max(lastActivity, new Date(entry.timestamp).getTime());
+            } catch(_) {}
+        }
+        return { agent: 'claude', model, tokensIn, tokensOut,
+            costUsd: awCalcCost(model, tokensIn, tokensOut),
+            ctxUsedPct: awCtxPct(model, tokensIn),
+            state: (Date.now() - lastActivity < 60000) ? 'active' : 'idle',
+            lastActivity };
+    } catch(_) { return null; }
+}
+
+function awWatchClaude() {
+    if (!fs.existsSync(AGENT_PATHS.claude)) return;
+    function scanAll() {
+        let best = null;
+        try {
+            fs.readdirSync(AGENT_PATHS.claude, { withFileTypes: true }).forEach(proj => {
+                if (!proj.isDirectory()) return;
+                const projDir = path.join(AGENT_PATHS.claude, proj.name);
+                try {
+                    fs.readdirSync(projDir).filter(f => f.endsWith('.jsonl')).forEach(file => {
+                        const s = awParseClaudeLog(path.join(projDir, file));
+                        if (s && (!best || s.lastActivity > best.lastActivity)) best = s;
+                    });
+                } catch(_) {}
+            });
+        } catch(_) {}
+        if (best) { awSessions['claude'] = best; awBroadcast(); }
+    }
+    scanAll();
+    try {
+        fs.watch(AGENT_PATHS.claude, { recursive: true }, (evt, filename) => {
+            if (filename && filename.endsWith('.jsonl')) setTimeout(scanAll, 300);
+        });
+    } catch(_) {}
+}
+
+// --- Antigravity CLI parser ---
+function awParseAntigravity() {
+    const brainDir = AGENT_PATHS.antigravity;
+    try {
+        let tokensIn = 0, tokensOut = 0, model = 'gemini-2.5-flash', lastActivity = 0;
+        const dirs = fs.readdirSync(brainDir, { withFileTypes: true })
+            .filter(d => d.isDirectory()).map(d => d.name);
+        for (const convId of dirs) {
+            const logPath = path.join(brainDir, convId, '.system_generated', 'logs', 'transcript.jsonl');
+            if (!fs.existsSync(logPath)) continue;
+            try {
+                const lines = fs.readFileSync(logPath, 'utf-8').trim().split('\n').filter(Boolean);
+                for (const line of lines) {
+                    try {
+                        const entry = JSON.parse(line);
+                        if (entry.usage_metadata) {
+                            tokensIn += entry.usage_metadata.prompt_token_count || 0;
+                            tokensOut += entry.usage_metadata.candidates_token_count || 0;
+                        }
+                        if (entry.model) model = entry.model;
+                        if (entry.timestamp) lastActivity = Math.max(lastActivity, new Date(entry.timestamp).getTime());
+                    } catch(_) {}
+                }
+            } catch(_) {}
+        }
+        return { agent: 'antigravity', model, tokensIn, tokensOut,
+            costUsd: awCalcCost(model, tokensIn, tokensOut),
+            ctxUsedPct: awCtxPct(model, tokensIn),
+            state: (Date.now() - lastActivity < 120000) ? 'active' : 'idle',
+            lastActivity };
+    } catch(_) { return null; }
+}
+
+function awWatchAntigravity() {
+    if (!fs.existsSync(AGENT_PATHS.antigravity)) return;
+    const scan = () => {
+        const s = awParseAntigravity();
+        if (s) { awSessions['antigravity'] = s; awBroadcast(); }
+    };
+    scan();
+    try {
+        fs.watch(AGENT_PATHS.antigravity, { recursive: true }, (evt, filename) => {
+            if (filename && filename.includes('transcript')) setTimeout(scan, 500);
+        });
+    } catch(_) {}
+}
+
+// --- OpenCode parser ---
+function awParseOpenCode() {
+    const dir = AGENT_PATHS.opencode;
+    try {
+        let tokensIn = 0, tokensOut = 0, model = 'gpt-4o', lastActivity = 0;
+        fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).forEach(file => {
+            try {
+                const lines = fs.readFileSync(path.join(dir, file), 'utf-8').trim().split('\n').filter(Boolean);
+                lines.forEach(line => {
+                    try {
+                        const e = JSON.parse(line);
+                        if (e.usage) { tokensIn += e.usage.prompt_tokens || 0; tokensOut += e.usage.completion_tokens || 0; }
+                        if (e.model) model = e.model;
+                        if (e.time) lastActivity = Math.max(lastActivity, new Date(e.time).getTime());
+                    } catch(_) {}
+                });
+            } catch(_) {}
+        });
+        return { agent: 'opencode', model, tokensIn, tokensOut,
+            costUsd: awCalcCost(model, tokensIn, tokensOut),
+            ctxUsedPct: awCtxPct(model, tokensIn),
+            state: (Date.now() - lastActivity < 60000) ? 'active' : 'idle',
+            lastActivity };
+    } catch(_) { return null; }
+}
+
+function awWatchOpenCode() {
+    if (!fs.existsSync(AGENT_PATHS.opencode)) return;
+    const scan = () => { const s = awParseOpenCode(); if (s) { awSessions['opencode'] = s; awBroadcast(); } };
+    scan();
+    try { fs.watch(AGENT_PATHS.opencode, { recursive: true }, () => setTimeout(scan, 300)); } catch(_) {}
+}
+
+// --- Codex CLI parser ---
+function awParseCodex() {
+    const dir = AGENT_PATHS.codex;
+    try {
+        let tokensIn = 0, tokensOut = 0, model = 'gpt-4o', lastActivity = 0;
+        fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).forEach(file => {
+            try {
+                const lines = fs.readFileSync(path.join(dir, file), 'utf-8').trim().split('\n').filter(Boolean);
+                lines.forEach(line => {
+                    try {
+                        const e = JSON.parse(line);
+                        if (e.usage) {
+                            tokensIn += e.usage.input_tokens || e.usage.prompt_tokens || 0;
+                            tokensOut += e.usage.output_tokens || e.usage.completion_tokens || 0;
+                        }
+                        if (e.model) model = e.model;
+                        if (e.created_at || e.timestamp) lastActivity = Math.max(lastActivity, new Date(e.created_at || e.timestamp).getTime());
+                    } catch(_) {}
+                });
+            } catch(_) {}
+        });
+        return { agent: 'codex', model, tokensIn, tokensOut,
+            costUsd: awCalcCost(model, tokensIn, tokensOut),
+            ctxUsedPct: awCtxPct(model, tokensIn),
+            state: (Date.now() - lastActivity < 60000) ? 'active' : 'idle',
+            lastActivity };
+    } catch(_) { return null; }
+}
+
+function awWatchCodex() {
+    if (!fs.existsSync(AGENT_PATHS.codex)) return;
+    const scan = () => { const s = awParseCodex(); if (s) { awSessions['codex'] = s; awBroadcast(); } };
+    scan();
+    try { fs.watch(AGENT_PATHS.codex, { recursive: true }, () => setTimeout(scan, 300)); } catch(_) {}
+}
+
 function createWindow(settings) {
     signale.info("Creating window...");
 
@@ -310,6 +542,14 @@ app.on('ready', async () => {
     signale.pending("Starting multithreaded calls controller...");
     require("./_multithread.js");
     createWindow(settings);
+
+    // Start AgentWatch watchers
+    awWatchClaude();
+    awWatchAntigravity();
+    awWatchOpenCode();
+    awWatchCodex();
+    // Re-broadcast every 30s to update idle/active state even with no file changes
+    setInterval(awBroadcast, 30000);
 
     signale.pending(`Resolving shell path...`);
 
