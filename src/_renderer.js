@@ -353,7 +353,7 @@ async function getDisplayName() {
 
     try {
         let usernameMod = require("username");
-        user = await (typeof usernameMod === "function" ? usernameMod() : (usernameMod.username ? usernameMod.username() : usernameMod.default()));
+        user = await (typeof usernameMod === "function" ? usernameMod() : (usernameMod.username ? usernameMod.username() : (usernameMod.default ? usernameMod.default() : null)));
     } catch (e) { }
 
     return user;

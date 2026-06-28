@@ -280,7 +280,11 @@ app.on('ready', async () => {
 
     // See #366
     let shellEnvMod = require("shell-env");
-    let cleanEnv = await (typeof shellEnvMod === "function" ? shellEnvMod(settings.shell) : shellEnvMod.shellEnv(settings.shell)).catch(e => { throw e; });
+    let cleanEnv = await (
+        typeof shellEnvMod === "function" 
+            ? shellEnvMod(settings.shell) 
+            : (shellEnvMod.shellEnv ? shellEnvMod.shellEnv(settings.shell) : Promise.reject(new Error("shellEnv method not found in shell-env module")))
+    ).catch(e => { throw e; });
 
     Object.assign(cleanEnv, {
         TERM: "xterm-256color",
