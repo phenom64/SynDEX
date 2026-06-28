@@ -68,3 +68,53 @@ section > h3.title:first-child::after {
     bottom: -0.555vh;
     height: 0.46vh;
 }
+
+/* Retro CRT Effect */
+body.retro-crt::before {
+    content: " ";
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: repeating-linear-gradient(
+        0deg,
+        rgba(0, 0, 0, 0.12) 0px,
+        rgba(0, 0, 0, 0.12) 1px,
+        transparent 1px,
+        transparent 3px
+    );
+    z-index: 999999;
+    pointer-events: none;
+    animation: crt-flicker 0.15s infinite;
+}
+
+body.retro-crt::after {
+    content: " ";
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: radial-gradient(
+        circle,
+        rgba(0, 0, 0, 0) 55%,
+        rgba(0, 0, 0, 0.3) 85%,
+        rgba(0, 0, 0, 0.6) 100%
+    );
+    z-index: 1000000;
+    pointer-events: none;
+}
+
+@keyframes crt-flicker {
+    0% { opacity: 0.985; }
+    50% { opacity: 1.0; }
+    100% { opacity: 0.99; }
+}
+
+.retro-crt .xterm-rows {
+    text-shadow: 0 0 2px rgba(var(--color_r), var(--color_g), var(--color_b), 0.8),
+                 0 0 4px rgba(var(--color_r), var(--color_g), var(--color_b), 0.4);
+}

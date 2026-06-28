@@ -53,6 +53,16 @@ window.settings = require(settingsFile);
 window.shortcuts = require(shortcutsFile);
 window.lastWindowState = require(lastWindowStateFile);
 
+// Helper to set body class while preserving retro CRT effect if enabled
+function setBodyClass(className) {
+    if (window.settings && window.settings.retroTerminalEffect === true) {
+        document.body.className = className ? `${className} retro-crt` : "retro-crt";
+    } else {
+        document.body.className = className || "";
+    }
+}
+setBodyClass(document.body.className);
+
 // Load CLI parameters
 const args = ipc.invoke("get-cli-args").then(args => {
     console.log(args);
@@ -88,8 +98,79 @@ ipc.once("getKbOverride", (e, layout) => {
 });
 ipc.send("getKbOverride");
 
+function hexToRgb(hex) {
+    if (!hex) return null;
+    hex = hex.replace(/^#/, '');
+    if (hex.length === 3) {
+        hex = hex.split('').map(c => c + c).join('');
+    }
+    if (hex.length === 6) {
+        const num = parseInt(hex, 16);
+        return {
+            r: (num >> 16) & 255,
+            g: (num >> 8) & 255,
+            b: num & 255
+        };
+    }
+    return null;
+}
+
 // Load UI theme
 window._loadTheme = theme => {
+    theme.terminal = theme.terminal || {};
+    theme.colors = theme.colors || {};
+
+    let terminalSettingsHelper;
+    try {
+        terminalSettingsHelper = require(path.join(__dirname, "classes", "terminalSettingsHelper.js"));
+    } catch (err) {
+        console.error("Failed to load terminalSettingsHelper:", err);
+    }
+
+    if (terminalSettingsHelper) {
+        const wtFont = terminalSettingsHelper.getFontFamily();
+        if (wtFont) {
+            theme.terminal.fontFamily = wtFont;
+        }
+
+        if (window.settings && window.settings.windowsTerminalColorScheme) {
+            const scheme = terminalSettingsHelper.getColorScheme(window.settings.windowsTerminalColorScheme);
+            if (scheme) {
+                theme.terminal.foreground = scheme.foreground || theme.terminal.foreground;
+                theme.terminal.background = scheme.background || theme.terminal.background;
+                theme.terminal.cursor = scheme.cursorColor || theme.terminal.cursor;
+                theme.terminal.selection = scheme.selectionBackground || scheme.cursorColor || theme.terminal.selection;
+
+                const ansiKeys = [
+                    "black", "red", "green", "yellow", "blue", "cyan", "white",
+                    "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightCyan", "brightWhite"
+                ];
+                ansiKeys.forEach(key => {
+                    if (scheme[key] !== undefined) {
+                        theme.colors[key] = scheme[key];
+                    }
+                });
+                if (scheme.purple !== undefined || scheme.magenta !== undefined) {
+                    theme.colors.magenta = scheme.purple || scheme.magenta;
+                }
+                if (scheme.brightPurple !== undefined || scheme.brightMagenta !== undefined) {
+                    theme.colors.brightMagenta = scheme.brightPurple || scheme.brightMagenta;
+                }
+
+                if (window.settings.applyTerminalSchemeToUI === true) {
+                    const accentColor = scheme.cursorColor || scheme.foreground;
+                    if (accentColor) {
+                        const rgb = hexToRgb(accentColor);
+                        if (rgb) {
+                            theme.colors.r = rgb.r.toString();
+                            theme.colors.g = rgb.g.toString();
+                            theme.colors.b = rgb.b.toString();
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     if (document.querySelector("style.theming")) {
         document.querySelector("style.theming").remove();
@@ -98,14 +179,17 @@ window._loadTheme = theme => {
     // Load fonts
     let mainFont = new FontFace(theme.cssvars.font_main, `url("${path.join(fontsDir, theme.cssvars.font_main.toLowerCase().replace(/ /g, '_') + '.woff2').replace(/\\/g, '/')}")`);
     let lightFont = new FontFace(theme.cssvars.font_main_light, `url("${path.join(fontsDir, theme.cssvars.font_main_light.toLowerCase().replace(/ /g, '_') + '.woff2').replace(/\\/g, '/')}")`);
-    let termFont = new FontFace(theme.terminal.fontFamily, `url("${path.join(fontsDir, theme.terminal.fontFamily.toLowerCase().replace(/ /g, '_') + '.woff2').replace(/\\/g, '/')}")`);
 
     document.fonts.add(mainFont);
     document.fonts.load("12px " + theme.cssvars.font_main);
     document.fonts.add(lightFont);
     document.fonts.load("12px " + theme.cssvars.font_main_light);
-    document.fonts.add(termFont);
-    document.fonts.load("12px " + theme.terminal.fontFamily);
+
+    if (theme.terminal.fontFamily === "Fira Mono") {
+        let termFont = new FontFace(theme.terminal.fontFamily, `url("${path.join(fontsDir, theme.terminal.fontFamily.toLowerCase().replace(/ /g, '_') + '.woff2').replace(/\\/g, '/')}")`);
+        document.fonts.add(termFont);
+        document.fonts.load("12px " + theme.terminal.fontFamily);
+    }
 
     document.querySelector("head").innerHTML += `<style class="theming">
     :root {
@@ -229,7 +313,7 @@ if (window.settings.nointro || window.settings.nointroOverride) {
     initGraphicalErrorHandling();
     initSystemInformationProxy();
     document.getElementById("boot_screen").remove();
-    document.body.setAttribute("class", "");
+    setBodyClass("");
     waitForFonts().then(initUI);
 } else {
     displayLine();
@@ -304,14 +388,14 @@ async function displayTitleScreen() {
 
     await _delay(400);
 
-    document.body.setAttribute("class", "");
+    setBodyClass("");
     bootScreen.setAttribute("class", "center");
     bootScreen.innerHTML = "<h1>xDEX-UI</h1>";
     let title = document.querySelector("section > h1");
 
     await _delay(200);
 
-    document.body.setAttribute("class", "solidBackground");
+    setBodyClass("solidBackground");
 
     await _delay(100);
 
@@ -328,7 +412,7 @@ async function displayTitleScreen() {
 
     await _delay(500);
 
-    document.body.setAttribute("class", "");
+    setBodyClass("");
     title.setAttribute("class", "");
     title.setAttribute("style", `border: 5px solid rgb(${window.theme.r}, ${window.theme.g}, ${window.theme.b});`);
 
