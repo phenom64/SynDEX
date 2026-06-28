@@ -2,12 +2,14 @@ const fs = require("fs");
 const path = require("path");
 const which = require("which");
 
-// Helper to strip comments and trailing commas from JSON
+// Helper to strip comments and trailing commas from JSON safely
 function parseJsonc(content) {
     if (!content) return null;
     try {
-        // Strip comments
-        let cleaned = content.replace(/\/\*[\s\S]*?\*\/|([^\\:]|^)\/\/.*$/gm, '$1');
+        // Match string literals first, and keep them. Only strip comments outside of strings.
+        let cleaned = content.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*")|(\/\*[\s\S]*?\/|\/\/.*)/g, (match, g1) => {
+            return g1 ? g1 : "";
+        });
         // Strip trailing commas
         cleaned = cleaned.replace(/,(\s*[\]}])/g, '$1');
         return JSON.parse(cleaned);
@@ -31,14 +33,26 @@ function readSettings() {
     if (process.platform !== "win32") return null;
     const localAppData = getLocalAppDataPath();
     if (!localAppData) return null;
-    const settingsPath = path.join(localAppData, "Packages", "Microsoft.WindowsTerminal_8wekyb3d8bbwe", "LocalState", "settings.json");
-    if (!fs.existsSync(settingsPath)) return null;
-    try {
-        const content = fs.readFileSync(settingsPath, "utf-8");
-        return parseJsonc(content);
-    } catch (e) {
-        return null;
+    
+    // Check multiple potential paths: Stable Store version, Preview version, and Unpackaged/Portable version
+    const paths = [
+        path.join(localAppData, "Packages", "Microsoft.WindowsTerminal_8wekyb3d8bbwe", "LocalState", "settings.json"),
+        path.join(localAppData, "Packages", "Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe", "LocalState", "settings.json"),
+        path.join(localAppData, "Microsoft", "Windows Terminal", "settings.json")
+    ];
+    
+    for (const settingsPath of paths) {
+        if (fs.existsSync(settingsPath)) {
+            try {
+                const content = fs.readFileSync(settingsPath, "utf-8");
+                const parsed = parseJsonc(content);
+                if (parsed) return parsed;
+            } catch (e) {
+                // Try next path
+            }
+        }
     }
+    return null;
 }
 
 // Safe resolution of executables
