@@ -6,27 +6,35 @@
     opacity: 0 !important;
     padding: 0 !important;
     pointer-events: none !important;
-    transition: max-width 0.35s ease, opacity 0.25s ease, padding 0.3s ease !important;
+    transition: max-width 0.35s ease, max-height 0.35s ease, opacity 0.25s ease, padding 0.3s ease !important;
 }
 
 #mod_column_left,
 #mod_column_right {
-    transition: max-width 0.35s ease, opacity 0.25s ease;
+    transition: left 0.35s ease, max-width 0.35s ease, height 0.35s ease, opacity 0.25s ease;
     overflow: hidden;
 }
 
 #keyboard {
-    transition: max-height 0.35s ease, opacity 0.25s ease;
+    transition: left 0.35s ease, right 0.35s ease, max-height 0.35s ease, height 0.35s ease, opacity 0.25s ease;
     overflow: hidden;
 }
 
-#keyboard.panel-hidden {
+#agent_watch {
+    transition: left 0.35s ease, right 0.35s ease, max-height 0.35s ease, height 0.35s ease, opacity 0.25s ease;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+#keyboard.panel-hidden,
+#agent_watch.panel-hidden {
     max-height: 0 !important;
     min-height: 0 !important;
+    height: 0 !important;
 }
 
 #filesystem {
-    transition: width 0.35s ease, opacity 0.25s ease;
+    transition: left 0.35s ease, width 0.35s ease, opacity 0.25s ease;
 }
 
 #filesystem.panel-hidden {
@@ -37,10 +45,22 @@
 body.syndex-layout {
     --syndex-gutter: 0.8vh;
     --syndex-col-w: 16.3vw;
-    --syndex-col-left: var(--syndex-gutter);
-    --syndex-col-right: 17.15vw;
     --syndex-main-left: 33.55vw;
     --syndex-main-w: 65.6vw;
+    --syndex-main-h: 62vh;
+    --syndex-col-h: calc(100vh - 34.5vh);
+    --syndex-col-right-left: 17.15vw;
+    --syndex-fs-left: 0.8vh;
+    --syndex-fs-w: 30.4vw;
+    --syndex-kb-left: 50.8vw;
+    --syndex-kb-right: 0.8vh;
+    --syndex-aw-left: auto;
+    --syndex-aw-right: 0.8vh;
+    --syndex-aw-w: 18.2vw;
+    --syndex-aw-top: auto;
+    --syndex-aw-bottom: 0.925vh;
+    --syndex-aw-h: 30vh;
+    --syndex-kb-h: 32vh;
     position: relative;
     display: block;
     padding-top: 0;
@@ -56,215 +76,160 @@ body.syndex-layout section#agent_watch {
 }
 
 body.syndex-layout section#mod_column_left {
-    left: 0.8vh;
+    left: var(--syndex-gutter);
     top: 2.5vh;
-    width: 16.3vw;
-    height: calc(100vh - 34.5vh);
+    width: var(--syndex-col-w);
+    height: var(--syndex-col-h) !important;
+    max-height: var(--syndex-col-h);
 }
 
 body.syndex-layout section#mod_column_left > h3.title {
-    left: 0.8vh;
-    width: 15.2vw;
+    left: var(--syndex-gutter);
+    width: calc(var(--syndex-col-w) - 1.1vw);
 }
 
 body.syndex-layout section#mod_column_right {
-    left: 17.15vw;
+    left: var(--syndex-col-right-left);
     top: 2.5vh;
-    width: 16.3vw;
-    height: calc(100vh - 34.5vh);
+    width: var(--syndex-col-w);
+    height: var(--syndex-col-h) !important;
+    max-height: var(--syndex-col-h);
     right: auto;
 }
 
 body.syndex-layout section#mod_column_right > h3.title {
-    left: 17.15vw;
-    width: 15.2vw;
+    left: var(--syndex-col-right-left);
+    width: calc(var(--syndex-col-w) - 1.1vw);
     right: auto;
 }
 
 body.syndex-layout section#main_shell {
-    left: 33.55vw;
+    left: var(--syndex-main-left);
     top: 3.7vh;
-    width: 65.6vw;
-    height: 62vh;
+    width: var(--syndex-main-w);
+    height: var(--syndex-main-h) !important;
     margin-bottom: 0 !important;
+    transition: left 0.35s ease, width 0.35s ease, height 0.35s ease;
 }
 
 body.syndex-layout section#main_shell > h3.title {
-    left: 33.55vw;
-    width: 65.6vw;
+    left: var(--syndex-main-left);
+    width: var(--syndex-main-w);
+    transition: left 0.35s ease, width 0.35s ease;
 }
 
 body.syndex-layout section#filesystem {
-    left: 0.8vh;
+    left: var(--syndex-fs-left);
     bottom: 0.925vh;
     top: auto;
-    width: 30.4vw;
+    width: var(--syndex-fs-w);
     height: 30vh;
     margin-right: 0;
+    z-index: 5;
 }
 
 body.syndex-layout section#filesystem > h3.title,
 body.syndex-layout section#filesystem div#fs_disp_container {
-    width: 30.4vw;
+    width: var(--syndex-fs-w);
 }
 
 body.syndex-layout section#keyboard {
-    left: 50.8vw;
-    right: 0.8vh;
+    left: var(--syndex-kb-left);
+    right: var(--syndex-kb-right);
     bottom: 0.925vh;
     top: auto;
-    width: auto;
+    width: auto !important;
+    max-width: none;
     height: 30vh;
-    justify-content: flex-end;
+    display: block;
+    overflow: hidden;
+    z-index: 5;
+    box-sizing: border-box;
+    padding: 0.4vh 0.5vw;
+    position: absolute;
 }
 
-body.syndex-layout.agent-watch-bottom-left section#agent_watch {
-    left: 31.8vw;
-    right: auto;
-    width: 18.2vw;
+body.syndex-layout #keyboard_fit_box {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    box-sizing: border-box;
 }
 
-body.syndex-layout.agent-watch-bottom-right section#filesystem {
-    width: 43vw;
+body.syndex-layout #keyboard_scale_inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: max-content !important;
+    flex-shrink: 0;
 }
 
-body.syndex-layout.agent-watch-bottom-right section#filesystem > h3.title,
-body.syndex-layout.agent-watch-bottom-right section#filesystem div#fs_disp_container {
-    width: 43vw;
+body.syndex-layout section#keyboard.animation_state_1 > #keyboard_fit_box,
+body.syndex-layout section#keyboard.animation_state_2 > #keyboard_fit_box {
+    width: 100% !important;
+    filter: brightness(100%);
 }
 
-body.syndex-layout.agent-watch-bottom-right section#keyboard {
-    left: 43.8vw;
-    right: 25vw;
+body.syndex-layout section#keyboard.animation_state_1 > #keyboard_scale_inner,
+body.syndex-layout section#keyboard.animation_state_2 > #keyboard_scale_inner {
+    width: max-content !important;
+    filter: brightness(100%);
 }
 
-body.syndex-layout.agent-watch-bottom-right section#agent_watch {
-    left: auto;
-    right: 0.8vh;
-    width: 24vw;
+body.syndex-layout section#keyboard div.keyboard_row {
+    flex-shrink: 0;
 }
 
-body.syndex-layout.agent-watch-right-rail section#mod_column_right {
-    height: 49vh;
+body.syndex-layout section#keyboard div.keyboard_row:last-child {
+    left: 0;
+    position: relative;
 }
 
-body.syndex-layout.agent-watch-right-rail section#agent_watch {
-    left: 17.15vw;
-    right: auto;
-    top: 54vh;
-    bottom: auto;
-    width: 16.3vw;
-    height: 43vh;
+body.syndex-layout div.keyboard_row#row_2 > div.keyboard_enter {
+    right: 0;
 }
 
-body.syndex-layout.agent-watch-right-rail section#keyboard {
-    left: 43.8vw;
+body.syndex-layout section#agent_watch {
+    left: var(--syndex-aw-left);
+    right: var(--syndex-aw-right);
+    top: var(--syndex-aw-top);
+    bottom: var(--syndex-aw-bottom);
+    width: var(--syndex-aw-w);
+    max-width: var(--syndex-aw-w);
+    height: var(--syndex-aw-h);
+    overflow: hidden;
+    z-index: 5;
 }
 
-body.syndex-layout.panel-agentwatch-hidden section#filesystem {
-    width: 43vw;
+body.syndex-layout section#agent_watch > h3.title {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    top: 0;
+    width: 100% !important;
+    margin: 0;
+    box-sizing: border-box;
+    z-index: 2;
 }
 
-body.syndex-layout.panel-agentwatch-hidden section#filesystem > h3.title,
-body.syndex-layout.panel-agentwatch-hidden section#filesystem div#fs_disp_container {
-    width: 43vw;
+body.syndex-layout section#agent_watch > h3.title > p {
+    width: 49.4%;
 }
 
-body.syndex-layout.panel-agentwatch-hidden section#keyboard {
-    left: 43.8vw;
-    right: 0.8vh;
+body.syndex-layout section#agent_watch #mod_agentwatch {
+    margin-top: 1.55vh;
+    height: calc(100% - 1.55vh);
 }
 
-body.syndex-layout.panel-filesystem-hidden section#agent_watch {
-    left: 0.8vh;
-    right: auto;
-    width: 31vw;
-}
-
-body.syndex-layout.panel-filesystem-hidden section#keyboard {
-    left: 32.5vw;
-    right: 0.8vh;
-}
-
-body.syndex-layout.panel-filesystem-hidden.panel-agentwatch-hidden section#keyboard {
-    left: 0.8vh;
-    right: 0.8vh;
-}
-
-body.syndex-layout.panel-keyboard-hidden section#main_shell {
-    height: calc(100vh - 6vh);
-}
-
-body.syndex-layout.panel-keyboard-hidden:not(.panel-agentwatch-hidden) section#main_shell {
-    height: calc(100vh - 37vh);
-}
-
-body.syndex-layout.panel-keyboard-hidden section#keyboard {
-    display: none;
-}
-
-body.syndex-layout.panel-keyboard-hidden section#filesystem {
-    width: 43vw;
-}
-
-body.syndex-layout.panel-keyboard-hidden section#filesystem > h3.title,
-body.syndex-layout.panel-keyboard-hidden section#filesystem div#fs_disp_container {
-    width: 43vw;
-}
-
-body.syndex-layout.panel-keyboard-hidden section#agent_watch {
-    left: auto;
-    right: 0.8vh;
-    width: 24vw;
-}
-
-body.syndex-layout.panel-keyboard-hidden.panel-filesystem-hidden section#agent_watch {
-    left: 0.8vh;
-    right: auto;
-    width: 31vw;
-}
-
-body.syndex-layout.panel-keyboard-hidden.panel-filesystem-hidden.panel-agentwatch-hidden section#main_shell {
-    height: calc(100vh - 6vh);
-}
-
-/* Right column hidden, left column visible: expand terminal into right column slot */
-body.syndex-layout.panel-network-hidden:not(.panel-left-hidden) section#main_shell {
-    left: var(--syndex-col-right);
-    width: calc(100vw - var(--syndex-col-right) - var(--syndex-gutter));
-}
-
-body.syndex-layout.panel-network-hidden:not(.panel-left-hidden) section#main_shell > h3.title {
-    left: var(--syndex-col-right);
-    width: calc(100vw - var(--syndex-col-right) - var(--syndex-gutter));
-}
-
-/* Left column hidden, right column visible: slide right column left, terminal follows */
-body.syndex-layout.panel-left-hidden:not(.panel-network-hidden) section#mod_column_right {
-    left: var(--syndex-gutter);
-}
-
-body.syndex-layout.panel-left-hidden:not(.panel-network-hidden) section#mod_column_right > h3.title {
-    left: var(--syndex-gutter);
-    right: auto;
-}
-
-body.syndex-layout.panel-left-hidden:not(.panel-network-hidden) section#main_shell {
-    left: calc(var(--syndex-gutter) + var(--syndex-col-w) + 0.25vw);
-    width: calc(100vw - var(--syndex-gutter) - var(--syndex-col-w) - 0.25vw - var(--syndex-gutter));
-}
-
-body.syndex-layout.panel-left-hidden:not(.panel-network-hidden) section#main_shell > h3.title {
-    left: calc(var(--syndex-gutter) + var(--syndex-col-w) + 0.25vw);
-    width: calc(100vw - var(--syndex-gutter) - var(--syndex-col-w) - 0.25vw - var(--syndex-gutter));
-}
-
-body.syndex-layout.panel-left-hidden.panel-network-hidden section#main_shell {
-    left: 0.8vh;
-    width: calc(100vw - 1.6vh);
-}
-
-body.syndex-layout.panel-left-hidden.panel-network-hidden section#main_shell > h3.title {
-    left: 0.8vh;
-    width: calc(100vw - 1.6vh);
+body.syndex-layout section#filesystem > h3.title {
+    position: absolute !important;
+    left: 0 !important;
+    right: 0 !important;
+    top: 0;
+    width: 100% !important;
+    box-sizing: border-box;
 }

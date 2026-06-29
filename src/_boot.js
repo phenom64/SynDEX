@@ -108,7 +108,11 @@ if (!fs.existsSync(settingsFile)) {
             keyboard: true,
             leftColumn: true,
             rightColumn: true,
-            filesystem: true
+            filesystem: true,
+            agentWatch: true
+        },
+        panelLayout: {
+            agentWatchSlot: "bottom-left"
         }
     }, "", 4));
     signale.info(`Default settings written to ${settingsFile}`);
@@ -121,12 +125,20 @@ if (!fs.existsSync(settingsFile)) {
             retroTerminalEffect: false,
             windowsTerminalColorScheme: "",
             applyTerminalSchemeToUI: false,
-            panelToggles: { keyboard: true, leftColumn: true, rightColumn: true, filesystem: true }
+            panelToggles: { keyboard: true, leftColumn: true, rightColumn: true, filesystem: true, agentWatch: true },
+            panelLayout: { agentWatchSlot: "bottom-left" }
         };
         for (const key in defaults) {
             if (!(key in currentSettings)) {
                 currentSettings[key] = defaults[key];
                 updated = true;
+            } else if (typeof defaults[key] === "object" && defaults[key] !== null && !Array.isArray(defaults[key])) {
+                for (const nestedKey in defaults[key]) {
+                    if (!(nestedKey in currentSettings[key])) {
+                        currentSettings[key][nestedKey] = defaults[key][nestedKey];
+                        updated = true;
+                    }
+                }
             }
         }
         if (updated) {
@@ -214,8 +226,10 @@ const HOME = os.homedir();
 
 const AGENT_PATHS = {
     claude: path.join(HOME, '.claude', 'projects'),
+    claudeRoot: path.join(HOME, '.claude'),
     antigravity: path.join(HOME, '.gemini', 'antigravity-cli', 'brain'),
     opencode: path.join(HOME, '.config', 'opencode'),
+    opencodeDb: path.join(HOME, '.local', 'share', 'opencode', 'opencode.db'),
     codex: path.join(HOME, '.codex')
 };
 
@@ -259,6 +273,102 @@ function awCtxPct(model, tokensIn) {
 let awSessions = {};
 let awDailyHistory = new Array(30).fill(0);
 
+function awNow() {
+    return Date.now();
+}
+
+function awProjectName(cwd) {
+    if (!cwd || typeof cwd !== "string") return "UNKNOWN";
+    return path.basename(cwd.replace(/[\\\/]+$/, "")) || cwd;
+}
+
+function awShortId(value) {
+    if (!value) return "";
+    return String(value).slice(0, 8);
+}
+
+function awNormalizeSession(session) {
+    const now = awNow();
+    const tokensIn = Number(session.tokensIn || 0);
+    const tokensOut = Number(session.tokensOut || 0);
+    const cacheRead = Number(session.cacheRead || 0);
+    const cacheCreate = Number(session.cacheCreate || 0);
+    const startedAt = Number(session.startedAt || session.lastActivity || now);
+    const lastActivity = Number(session.lastActivity || startedAt || 0);
+    const state = session.state || ((now - lastActivity < 90000) ? "active" : "idle");
+    const model = session.model || "unknown";
+    const contextTokens = Number(session.contextTokens || tokensIn + cacheRead);
+    const ctxUsedPct = (typeof session.ctxUsedPct === "number")
+        ? session.ctxUsedPct
+        : awCtxPct(model, contextTokens);
+    const agent = session.agent || "unknown";
+    const id = session.id || session.sessionId || agent;
+    return Object.assign({}, session, {
+        id,
+        sessionId: session.sessionId || id,
+        shortId: awShortId(id),
+        agent,
+        model,
+        projectName: session.projectName || awProjectName(session.cwd),
+        cwd: session.cwd || "",
+        tokensIn,
+        tokensOut,
+        cacheRead,
+        cacheCreate,
+        totalTokens: tokensIn + tokensOut + cacheRead + cacheCreate,
+        contextTokens,
+        costUsd: Number(session.costUsd || awCalcCost(model, tokensIn + cacheRead + cacheCreate, tokensOut)),
+        ctxUsedPct,
+        state,
+        startedAt,
+        lastActivity,
+        elapsedMs: Math.max(0, now - startedAt),
+        turns: Number(session.turns || 0),
+        currentTask: session.currentTask || (state === "active" ? "working" : "waiting")
+    });
+}
+
+function awUpsertSession(key, session) {
+    const normalized = awNormalizeSession(session);
+    awSessions[key] = normalized;
+    awDailyHistory[awDailyHistory.length - 1] = Object.values(awSessions)
+        .reduce((sum, s) => sum + (s.totalTokens || 0), 0);
+}
+
+function awWalkFiles(root, predicate, maxFiles = 80) {
+    const out = [];
+    const stack = [root];
+    while (stack.length && out.length < maxFiles) {
+        const dir = stack.pop();
+        let entries;
+        try {
+            entries = fs.readdirSync(dir, { withFileTypes: true });
+        } catch(_) {
+            continue;
+        }
+        for (const entry of entries) {
+            const p = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                stack.push(p);
+            } else if (!predicate || predicate(p, entry)) {
+                out.push(p);
+                if (out.length >= maxFiles) break;
+            }
+        }
+    }
+    return out;
+}
+
+function awRecentFiles(files, limit = 24) {
+    return files.map(file => {
+        try {
+            return { file, mtime: fs.statSync(file).mtimeMs };
+        } catch(_) {
+            return { file, mtime: 0 };
+        }
+    }).sort((a, b) => b.mtime - a.mtime).slice(0, limit).map(x => x.file);
+}
+
 function awBuildPayload() {
     const sessions = Object.values(awSessions);
     const dailyCostUsd = sessions.reduce((s, x) => s + (x.costUsd || 0), 0);
@@ -276,47 +386,64 @@ function awBroadcast() {
 function awParseClaudeLog(filePath) {
     try {
         const lines = fs.readFileSync(filePath, 'utf-8').trim().split('\n').filter(Boolean);
-        let tokensIn = 0, tokensOut = 0, model = 'claude-sonnet-4-6', lastActivity = 0;
+        let tokensIn = 0, tokensOut = 0, cacheRead = 0, cacheCreate = 0, model = 'claude-sonnet-4-6', lastActivity = 0, startedAt = 0, turns = 0, currentTask = "", sessionId = path.basename(filePath, ".jsonl");
         for (const line of lines) {
             try {
                 const entry = JSON.parse(line);
                 if (entry.usage) {
                     tokensIn += entry.usage.input_tokens || 0;
                     tokensOut += entry.usage.output_tokens || 0;
+                    cacheRead += entry.usage.cache_read_input_tokens || 0;
+                    cacheCreate += entry.usage.cache_creation_input_tokens || 0;
+                    turns++;
                 }
                 if (entry.model) model = entry.model;
-                if (entry.timestamp) lastActivity = Math.max(lastActivity, new Date(entry.timestamp).getTime());
+                if (entry.sessionId) sessionId = entry.sessionId;
+                if (entry.cwd) currentTask = entry.cwd;
+                if (entry.timestamp) {
+                    const ts = new Date(entry.timestamp).getTime();
+                    if (!startedAt || ts < startedAt) startedAt = ts;
+                    lastActivity = Math.max(lastActivity, ts);
+                }
             } catch(_) {}
         }
-        return { agent: 'claude', model, tokensIn, tokensOut,
-            costUsd: awCalcCost(model, tokensIn, tokensOut),
-            ctxUsedPct: awCtxPct(model, tokensIn),
+        return { agent: 'claude', sessionId, model, tokensIn, tokensOut, cacheRead, cacheCreate,
+            contextTokens: tokensIn + cacheRead,
             state: (Date.now() - lastActivity < 60000) ? 'active' : 'idle',
-            lastActivity };
+            startedAt, lastActivity, turns, currentTask, cwd: currentTask };
     } catch(_) { return null; }
 }
 
 function awWatchClaude() {
-    if (!fs.existsSync(AGENT_PATHS.claude)) return;
+    if (!fs.existsSync(AGENT_PATHS.claudeRoot)) return;
     function scanAll() {
-        let best = null;
+        const roots = [AGENT_PATHS.claudeRoot];
         try {
-            fs.readdirSync(AGENT_PATHS.claude, { withFileTypes: true }).forEach(proj => {
-                if (!proj.isDirectory()) return;
-                const projDir = path.join(AGENT_PATHS.claude, proj.name);
-                try {
-                    fs.readdirSync(projDir).filter(f => f.endsWith('.jsonl')).forEach(file => {
-                        const s = awParseClaudeLog(path.join(projDir, file));
-                        if (s && (!best || s.lastActivity > best.lastActivity)) best = s;
-                    });
-                } catch(_) {}
+            fs.readdirSync(HOME, { withFileTypes: true })
+                .filter(d => d.isDirectory() && d.name.startsWith(".claude-"))
+                .forEach(d => roots.push(path.join(HOME, d.name)));
+        } catch(_) {}
+        const seen = new Set();
+        try {
+            roots.forEach(root => {
+                const projectsDir = path.join(root, "projects");
+                if (!fs.existsSync(projectsDir)) return;
+                const files = awRecentFiles(awWalkFiles(projectsDir, file => file.endsWith(".jsonl"), 140), 8);
+                files.forEach(file => {
+                    const s = awParseClaudeLog(file);
+                    if (s) {
+                        const key = "claude:" + (s.sessionId || file);
+                        seen.add(key);
+                        awUpsertSession(key, Object.assign(s, { configRoot: root }));
+                    }
+                });
             });
         } catch(_) {}
-        if (best) { awSessions['claude'] = best; awBroadcast(); }
+        awBroadcast();
     }
     scanAll();
     try {
-        fs.watch(AGENT_PATHS.claude, { recursive: true }, (evt, filename) => {
+        fs.watch(AGENT_PATHS.claudeRoot, { recursive: true }, (evt, filename) => {
             if (filename && filename.endsWith('.jsonl')) setTimeout(scanAll, 300);
         });
     } catch(_) {}
@@ -348,8 +475,7 @@ function awParseAntigravity() {
             } catch(_) {}
         }
         return { agent: 'antigravity', model, tokensIn, tokensOut,
-            costUsd: awCalcCost(model, tokensIn, tokensOut),
-            ctxUsedPct: awCtxPct(model, tokensIn),
+            contextTokens: tokensIn,
             state: (Date.now() - lastActivity < 120000) ? 'active' : 'idle',
             lastActivity };
     } catch(_) { return null; }
@@ -359,7 +485,7 @@ function awWatchAntigravity() {
     if (!fs.existsSync(AGENT_PATHS.antigravity)) return;
     const scan = () => {
         const s = awParseAntigravity();
-        if (s) { awSessions['antigravity'] = s; awBroadcast(); }
+        if (s) { awUpsertSession('antigravity', s); awBroadcast(); }
     };
     scan();
     try {
@@ -388,52 +514,118 @@ function awParseOpenCode() {
             } catch(_) {}
         });
         return { agent: 'opencode', model, tokensIn, tokensOut,
-            costUsd: awCalcCost(model, tokensIn, tokensOut),
-            ctxUsedPct: awCtxPct(model, tokensIn),
+            contextTokens: tokensIn,
             state: (Date.now() - lastActivity < 60000) ? 'active' : 'idle',
             lastActivity };
     } catch(_) { return null; }
 }
 
+function awParseOpenCodeDb() {
+    if (!fs.existsSync(AGENT_PATHS.opencodeDb)) return null;
+    try {
+        const childProcess = require("child_process");
+        const sql = "select id, directory, title, provider, model, time_created, time_updated, total_input, total_output, total_cache_read, total_cache_write, version from session order by time_updated desc limit 8;";
+        const out = childProcess.execFileSync("sqlite3", ["-readonly", "-json", AGENT_PATHS.opencodeDb, sql], { encoding: "utf-8", timeout: 2500 });
+        return JSON.parse(out).map(row => ({
+            agent: "opencode",
+            sessionId: row.id,
+            cwd: row.directory,
+            projectName: awProjectName(row.directory),
+            currentTask: row.title || "session",
+            model: row.provider && row.model ? `${row.provider}/${row.model}` : (row.model || "opencode"),
+            tokensIn: Number(row.total_input || 0),
+            tokensOut: Number(row.total_output || 0),
+            cacheRead: Number(row.total_cache_read || 0),
+            cacheCreate: Number(row.total_cache_write || 0),
+            startedAt: Number(row.time_created || 0),
+            lastActivity: Number(row.time_updated || 0),
+            state: (Date.now() - Number(row.time_updated || 0) < 120000) ? "active" : "idle",
+            version: row.version || ""
+        }));
+    } catch(_) {
+        return null;
+    }
+}
+
 function awWatchOpenCode() {
-    if (!fs.existsSync(AGENT_PATHS.opencode)) return;
-    const scan = () => { const s = awParseOpenCode(); if (s) { awSessions['opencode'] = s; awBroadcast(); } };
+    if (!fs.existsSync(AGENT_PATHS.opencode) && !fs.existsSync(AGENT_PATHS.opencodeDb)) return;
+    const scan = () => {
+        const dbSessions = awParseOpenCodeDb();
+        if (dbSessions && dbSessions.length) {
+            dbSessions.forEach(s => awUpsertSession("opencode:" + s.sessionId, s));
+        } else {
+            const s = awParseOpenCode();
+            if (s) awUpsertSession('opencode', s);
+        }
+        awBroadcast();
+    };
     scan();
     try { fs.watch(AGENT_PATHS.opencode, { recursive: true }, () => setTimeout(scan, 300)); } catch(_) {}
 }
 
 // --- Codex CLI parser ---
 function awParseCodex() {
-    const dir = AGENT_PATHS.codex;
+    const dir = path.join(AGENT_PATHS.codex, "sessions");
     try {
-        let tokensIn = 0, tokensOut = 0, model = 'gpt-4o', lastActivity = 0;
-        fs.readdirSync(dir).filter(f => f.endsWith('.jsonl')).forEach(file => {
+        const sessions = [];
+        const files = awRecentFiles(awWalkFiles(dir, file => /rollout-.*\.jsonl$/i.test(path.basename(file)), 160), 10);
+        files.forEach(filePath => {
+            let tokensIn = 0, tokensOut = 0, cacheRead = 0, cacheCreate = 0, model = 'gpt-4o', lastActivity = 0, startedAt = 0, turns = 0, effort = "", cwd = "", sessionId = path.basename(filePath, ".jsonl"), currentTask = "session";
             try {
-                const lines = fs.readFileSync(path.join(dir, file), 'utf-8').trim().split('\n').filter(Boolean);
+                const lines = fs.readFileSync(filePath, 'utf-8').trim().split('\n').filter(Boolean);
                 lines.forEach(line => {
                     try {
                         const e = JSON.parse(line);
+                        if (e.type === "session_meta") {
+                            sessionId = e.session_id || e.id || sessionId;
+                            cwd = e.cwd || cwd;
+                            startedAt = e.timestamp ? new Date(e.timestamp).getTime() : startedAt;
+                        }
+                        if (e.type === "turn_context") {
+                            model = e.model || model;
+                            effort = e.effort || effort;
+                            cwd = e.cwd || cwd;
+                        }
+                        const msg = e.msg || e.event || e;
+                        if (msg.type === "token_count" || e.type === "token_count") {
+                            const usage = msg.info || msg.usage || e.usage || {};
+                            tokensIn = usage.total_token_usage?.input_tokens || usage.input_tokens || usage.prompt_tokens || tokensIn;
+                            tokensOut = usage.total_token_usage?.output_tokens || usage.output_tokens || usage.completion_tokens || tokensOut;
+                            cacheRead = usage.total_token_usage?.cached_input_tokens || usage.cache_read_input_tokens || cacheRead;
+                            turns++;
+                        }
                         if (e.usage) {
                             tokensIn += e.usage.input_tokens || e.usage.prompt_tokens || 0;
                             tokensOut += e.usage.output_tokens || e.usage.completion_tokens || 0;
+                            cacheRead += e.usage.cached_input_tokens || e.usage.cache_read_input_tokens || 0;
+                            turns++;
                         }
                         if (e.model) model = e.model;
-                        if (e.created_at || e.timestamp) lastActivity = Math.max(lastActivity, new Date(e.created_at || e.timestamp).getTime());
+                        if (msg.type === "agent_message" || e.type === "agent_message") currentTask = "responding";
+                        if (e.created_at || e.timestamp || msg.timestamp) {
+                            const ts = new Date(e.created_at || e.timestamp || msg.timestamp).getTime();
+                            if (!startedAt || ts < startedAt) startedAt = ts;
+                            lastActivity = Math.max(lastActivity, ts);
+                        }
                     } catch(_) {}
                 });
+                sessions.push({ agent: 'codex', sessionId, model, effort, cwd, projectName: awProjectName(cwd),
+                    tokensIn, tokensOut, cacheRead, cacheCreate, contextTokens: tokensIn + cacheRead,
+                    state: (Date.now() - lastActivity < 60000) ? 'active' : 'idle',
+                    startedAt, lastActivity, turns, currentTask });
             } catch(_) {}
         });
-        return { agent: 'codex', model, tokensIn, tokensOut,
-            costUsd: awCalcCost(model, tokensIn, tokensOut),
-            ctxUsedPct: awCtxPct(model, tokensIn),
-            state: (Date.now() - lastActivity < 60000) ? 'active' : 'idle',
-            lastActivity };
+        return sessions;
     } catch(_) { return null; }
 }
 
 function awWatchCodex() {
     if (!fs.existsSync(AGENT_PATHS.codex)) return;
-    const scan = () => { const s = awParseCodex(); if (s) { awSessions['codex'] = s; awBroadcast(); } };
+    const scan = () => {
+        const sessions = awParseCodex();
+        if (sessions && sessions.length) sessions.forEach(s => awUpsertSession("codex:" + s.sessionId, s));
+        awBroadcast();
+    };
     scan();
     try { fs.watch(AGENT_PATHS.codex, { recursive: true }, () => setTimeout(scan, 300)); } catch(_) {}
 }

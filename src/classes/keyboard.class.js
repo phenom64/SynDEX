@@ -117,7 +117,19 @@ class Keyboard {
             });
         });
 
-        this.container.childNodes.forEach(row => {
+        const fitBox = document.createElement("div");
+        fitBox.id = "keyboard_fit_box";
+        const scaleInner = document.createElement("div");
+        scaleInner.id = "keyboard_scale_inner";
+        while (this.container.firstChild) {
+            scaleInner.appendChild(this.container.firstChild);
+        }
+        fitBox.appendChild(scaleInner);
+        this.container.appendChild(fitBox);
+        this._fitBox = fitBox;
+        this._scaleInner = scaleInner;
+
+        scaleInner.childNodes.forEach(row => {
             row.childNodes.forEach(key => {
 
                 let enterElements = document.querySelectorAll(".keyboard_enter");

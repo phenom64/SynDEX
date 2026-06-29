@@ -88,8 +88,31 @@ class FilesystemDisplay {
             }
         });
 
+        this._bindContainerRefs = () => {
+            this.filesContainer = document.getElementById("fs_disp_container");
+            this.space_bar = {
+                text: document.querySelector("#fs_space_bar > h3"),
+                bar: document.querySelector("#fs_space_bar > progress")
+            };
+            this._titleDir = document.getElementById("fs_disp_title_dir");
+            this._titleMode = document.querySelector("section#filesystem > h3.title > p:first-of-type");
+        };
+
+        this._restoreContainer = () => {
+            container.innerHTML = `
+            <h3 class="title"><p>FILESYSTEM</p><p id="fs_disp_title_dir"></p></h3>
+            <div id="fs_disp_container">
+            </div>
+            <div id="fs_space_bar">
+                <h1>EXIT DISPLAY</h1>
+                <h3>Calculating available space...</h3><progress value="100" max="100"></progress>
+            </div>`;
+            this._bindContainerRefs();
+        };
+
         this.setFailedState = () => {
             this.failed = true;
+            this._reading = false;
             container.innerHTML = `
             <h3 class="title"><p>FILESYSTEM</p><p id="fs_disp_title_dir">EXECUTION FAILED</p></h3>
             <h2 id="fs_disp_error">CANNOT ACCESS CURRENT WORKING DIRECTORY</h2>`;
@@ -107,6 +130,7 @@ class FilesystemDisplay {
 
                 if (cwd && cwd !== this.cwd_path && window.currentTerm === num) {
                     this.cwd_path = cwd;
+                    this.failed = false;
                     if (this._fsWatcher) {
                         this._fsWatcher.close();
                     }
@@ -159,11 +183,24 @@ class FilesystemDisplay {
         };
 
         this.readFS = async dir => {
-            if (this.failed === true || this._reading) return false;
+            if (this._reading) return false;
+            if (!dir) {
+                dir = this.dirpath || (window.settings && window.settings.cwd);
+            }
+            if (!dir) return false;
+            if (typeof dir === "string" && dir.startsWith("FALLBACK |-- ")) {
+                dir = dir.slice(13);
+            }
+
+            if (this.failed || !document.getElementById("fs_disp_container")) {
+                this.failed = false;
+                this._restoreContainer();
+            }
+
             this._reading = true;
 
-            this._titleDir.innerText = this.dirpath;
-            if (this._noTracking) {
+            if (this._titleDir) this._titleDir.innerText = this.dirpath || dir;
+            if (this._noTracking && this._titleMode) {
                 this._titleMode.innerText = "FILESYSTEM TRACKING OFFLINE - DETACHED MODE";
             }
 
@@ -171,6 +208,7 @@ class FilesystemDisplay {
             let tcwd = dir;
             let content = await this._asyncFSwrapper.readdir(tcwd).catch(err => {
                 console.warn(err);
+                this._reading = false;
                 if (this._noTracking === true && this.dirpath) { // #262
                     this.setFailedState();
                     setTimeout(() => {
@@ -179,7 +217,10 @@ class FilesystemDisplay {
                 } else {
                     this.setFailedState();
                 }
+                return null;
             });
+
+            if (!content) return false;
 
             this.cwd = [];
 
@@ -236,9 +277,15 @@ class FilesystemDisplay {
                     this.cwd.push(e);
                     if (i === content.length-1) resolve();
                 });
-            }).catch(() => { this.setFailedState() });
+            }).catch(() => {
+                this._reading = false;
+                this.setFailedState();
+            });
 
-            if (this.failed) return false;
+            if (this.failed) {
+                this._reading = false;
+                return false;
+            }
 
             let ordering = {
                 dir: 0,
@@ -263,6 +310,7 @@ class FilesystemDisplay {
 
             if (tcwd === this.dirpath && snapshot === this._lastRenderSnapshot && this.filesContainer.getAttribute("class") !== "disks") {
                 this._reading = false;
+                this.reCalculateDiskUsage(tcwd);
                 return false;
             }
 
@@ -523,37 +571,70 @@ class FilesystemDisplay {
             }
         };
 
+        this._matchFsBlock = (targetPath, fsBlocks) => {
+            const norm = String(targetPath || "").replace(/\\/g, "/").toLowerCase();
+            let best = null;
+            (fsBlocks || []).forEach(fsBlock => {
+                const mount = String(fsBlock.mount || "").replace(/\\/g, "/").toLowerCase();
+                if (!mount || !norm.startsWith(mount)) return;
+                if (!best || mount.length > String(best.mount || "").length) best = fsBlock;
+            });
+            return best;
+        };
+
         this.reCalculateDiskUsage = async path => {
+            if (!this.space_bar || !this.space_bar.text || !this.space_bar.bar) {
+                this._bindContainerRefs();
+            }
+            if (!this.space_bar || !this.space_bar.text) return false;
+
+            const reqId = (this._diskReqId = (this._diskReqId || 0) + 1);
             this.fsBlock = null;
             this.space_bar.text.innerHTML = "Calculating available space...";
             this.space_bar.bar.removeAttribute("value");
 
-            window.si.fsSize().catch(() => {
+            let blocks;
+            try {
+                blocks = await window.si.fsSize();
+            } catch (err) {
+                console.warn("fsSize failed:", err);
+                if (reqId !== this._diskReqId) return false;
                 this.space_bar.text.innerHTML = "Could not calculate mountpoint usage.";
                 this.space_bar.bar.value = 100;
-            }).then(d => {
-                d.forEach(fsBlock => {
-                    if (path.startsWith(fsBlock.mount)) {
-                        this.fsBlock = fsBlock;
-                    }
-                });
-                this.renderDiskUsage(this.fsBlock);
-            });
+                return false;
+            }
+
+            if (reqId !== this._diskReqId) return false;
+            this.fsBlock = this._matchFsBlock(path, blocks);
+            this.renderDiskUsage(this.fsBlock);
         };
 
         this.renderDiskUsage = async fsBlock => {
-            if (document.getElementById("fs_space_bar").getAttribute("onclick") !== "" || fsBlock === null) return;
+            const bar = document.getElementById("fs_space_bar");
+            if (!this.space_bar || !this.space_bar.text || !bar) return;
+            if (bar.getAttribute("onclick") !== "") return;
+
+            if (!fsBlock) {
+                if (this._lastFsBlock) {
+                    fsBlock = this._lastFsBlock;
+                } else {
+                    this.space_bar.text.innerHTML = "Could not calculate mountpoint usage.";
+                    this.space_bar.bar.value = 100;
+                    return;
+                }
+            }
 
             let splitter = (process.platform === "win32") ? "\\" : "/";
             let displayMount = (fsBlock.mount.length < 18) ? fsBlock.mount : "..."+splitter+fsBlock.mount.split(splitter).pop();
 
             // See #226
             if (!isNaN(fsBlock.use)) {
+                this._lastFsBlock = fsBlock;
                 this.space_bar.text.innerHTML = `Mount <strong>${displayMount}</strong> used <strong>${Math.round(fsBlock.use)}%</strong>`;
                 this.space_bar.bar.value = Math.round(fsBlock.use);
             } else if (!isNaN((fsBlock.size / fsBlock.used) * 100)) {
                 let usage = Math.round((fsBlock.size / fsBlock.used) * 100);
-
+                this._lastFsBlock = fsBlock;
                 this.space_bar.text.innerHTML = `Mount <strong>${displayMount}</strong> used <strong>${usage}%</strong>`;
                 this.space_bar.bar.value = usage;
             } else {
@@ -773,6 +854,18 @@ class FilesystemDisplay {
                 }
             }, 1000);
         }
+        this.failed = false;
+        if (!document.getElementById("fs_disp_container")) {
+            this._restoreContainer();
+        }
+        if (this.dirpath) {
+            this.reCalculateDiskUsage(this.dirpath);
+            return;
+        }
+        const term = window.term && window.term[window.currentTerm];
+        const cwd = term && term.cwd;
+        const dir = (cwd && cwd.startsWith("FALLBACK |-- ") ? cwd.slice(13) : cwd) || (window.settings && window.settings.cwd);
+        if (dir) this.readFS(dir);
     }
 }
 
