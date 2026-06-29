@@ -63,11 +63,67 @@ section#agent_watch {
     cursor: pointer;
 }
 
+#aw_quota_panel {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-gap: 0.35vh;
+    margin: 0.1vh 2% 0.25vh;
+}
+
+.aw-quota-block {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15vh;
+    padding: 0.25vh 0.35vh;
+    border: 0.092vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.2);
+    background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.04);
+}
+
+.aw-quota-label {
+    font-family: var(--font_main);
+    font-size: 0.72vh;
+    opacity: 0.55;
+    letter-spacing: 0.08vh;
+}
+
+.aw-quota-row {
+    display: grid;
+    grid-template-columns: 2.2vh 1fr 3.2vh;
+    align-items: center;
+    gap: 0.25vw;
+    font-size: 0.72vh;
+    opacity: 0.85;
+}
+
+.aw-quota-track {
+    height: 0.75vh;
+    background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.1);
+    border: 0.092vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.22);
+    box-sizing: border-box;
+}
+
+.aw-quota-fill {
+    display: block;
+    height: 100%;
+    background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.8);
+    transition: width 0.8s ease;
+}
+
+.aw-quota-fill.warn { background: rgba(255, 180, 0, 0.85); }
+.aw-quota-fill.danger { background: rgba(255, 60, 60, 0.9); }
+
+.aw-quota-pct {
+    text-align: right;
+    font-family: var(--font_main);
+    font-size: 0.72vh;
+}
+
 #aw_stats_grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     grid-gap: 0.46vh;
     margin-top: 0.1vh;
+    padding: 0 2%;
 }
 
 #aw_stats_grid div {
@@ -93,9 +149,9 @@ section#agent_watch {
     display: flex;
     align-items: flex-end;
     gap: 0.12vw;
-    height: 2.2vh;
-    margin: 0.2vh 2% 0.35vh;
-    padding: 0.25vh 0.35vh;
+    height: 1.8vh;
+    margin: 0.15vh 2% 0.3vh;
+    padding: 0.2vh 0.35vh;
     border: 0.092vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.2);
     background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.04);
     box-sizing: border-box;
@@ -104,7 +160,7 @@ section#agent_watch {
 #aw_sparkline i {
     flex: 1;
     display: block;
-    min-width: 0.15vw;
+    min-width: 0.12vw;
     background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.55);
     transition: height 0.6s ease;
 }
@@ -113,17 +169,18 @@ section#agent_watch {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 0.35vh;
+    gap: 0.3vh;
     overflow-y: auto;
     overflow-x: hidden;
     padding: 0 2%;
-    margin-bottom: 0.2vh;
+    margin-bottom: 0.15vh;
+    min-height: 0;
 }
 
 .aw-card {
     border: 0.092vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.25);
     background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.03);
-    padding: 0.35vh 0.4vw;
+    padding: 0.3vh 0.4vw;
     box-sizing: border-box;
 }
 
@@ -133,14 +190,14 @@ section#agent_watch {
 }
 
 .aw-card-idle {
-    opacity: 0.5;
+    opacity: 0.55;
 }
 
 .aw-card-head {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 0.15vh;
+    margin-bottom: 0.1vh;
 }
 
 .aw-agent-tag {
@@ -149,32 +206,48 @@ section#agent_watch {
     letter-spacing: 0.1vh;
 }
 
+.aw-glyph {
+    font-style: normal;
+    opacity: 0.9;
+}
+
 .aw-state {
-    font-size: 0.72vh;
+    font-size: 0.68vh;
     letter-spacing: 0.08vh;
-    padding: 0.08vh 0.2vw;
+    padding: 0.06vh 0.18vw;
     border: 0.092vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.35);
 }
 
-.aw-state.active {
+.aw-state.active,
+.aw-state.working {
     border-color: rgba(var(--color_r), var(--color_g), var(--color_b), 0.9);
 }
 
 .aw-card-project {
-    font-size: 0.95vh;
+    font-size: 0.92vh;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    opacity: 0.85;
-    margin-bottom: 0.12vh;
+    opacity: 0.9;
+    margin-bottom: 0.08vh;
+}
+
+.aw-card-task {
+    font-size: 0.78vh;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.5;
+    margin-bottom: 0.1vh;
+    font-family: var(--font_main_light);
 }
 
 .aw-card-row {
     display: flex;
     gap: 0.5vw;
-    font-size: 0.82vh;
+    font-size: 0.8vh;
     opacity: 0.6;
-    margin-bottom: 0.2vh;
+    margin-bottom: 0.15vh;
 }
 
 .aw-card-model {
@@ -192,7 +265,7 @@ section#agent_watch {
 }
 
 .aw-ctx-track {
-    height: 0.85vh;
+    height: 0.8vh;
     background: rgba(var(--color_r), var(--color_g), var(--color_b), 0.12);
     border: 0.092vh solid rgba(var(--color_r), var(--color_g), var(--color_b), 0.25);
     box-sizing: border-box;
@@ -209,9 +282,30 @@ section#agent_watch {
 .aw-ctx-fill.danger { background: rgba(255, 60, 60, 0.9); }
 
 .aw-ctx-pct {
-    font-size: 0.82vh;
+    font-size: 0.8vh;
     text-align: right;
     font-family: var(--font_main);
+}
+
+.aw-ports {
+    display: flex;
+    gap: 0.5vw;
+    align-items: center;
+    padding: 0.2vh 2% 0;
+    font-size: 0.72vh;
+    opacity: 0.55;
+    border-top: 0.092vh dashed rgba(var(--color_r), var(--color_g), var(--color_b), 0.15);
+}
+
+.aw-ports-label {
+    font-family: var(--font_main);
+    letter-spacing: 0.08vh;
+}
+
+.aw-ports-list {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .aw-empty {
@@ -229,8 +323,8 @@ section#agent_watch {
     justify-content: space-between;
     gap: 1vw;
     margin-top: auto;
-    padding: 0.35vh 2% 0;
-    font-size: 0.78vh;
+    padding: 0.3vh 2% 0;
+    font-size: 0.75vh;
     opacity: 0.6;
     text-transform: uppercase;
     border-top: 0.092vh dashed rgba(var(--color_r), var(--color_g), var(--color_b), 0.2);

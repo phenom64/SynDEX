@@ -437,6 +437,9 @@ class Terminal {
             this.Pty = require("node-pty");
             this.Websocket = require("ws").Server;
             this.Ipc = require("electron").ipcMain;
+            this._winTerm = process.platform === "win32"
+                ? require("./terminalWindowsHelper.js")
+                : null;
 
             this.renderer = null;
             this.port = opts.port || 3000;
@@ -448,9 +451,42 @@ class Terminal {
             this.ondisconnected = () => {};
 
             this._disableCWDtracking = false;
+            this._disableProcessTracking = false;
+            this._oscBuffer = "";
+            this._cwdFailCount = 0;
+            this._processFailCount = 0;
+            this._pushCwd = cwd => {
+                if (!cwd || this.tty._cwd === cwd) return;
+                this.tty._cwd = cwd;
+                if (this.renderer) {
+                    this.renderer.send("terminal_channel-"+this.port, "New cwd", cwd);
+                }
+            };
+            this._parseOscFromData = data => {
+                if (!this._winTerm || !data) return;
+                const parsed = this._winTerm.parseOscCwd(data, this._oscBuffer);
+                this._oscBuffer = parsed.buffer;
+                if (parsed.cwd) {
+                    this.tty._oscCwd = parsed.cwd;
+                    this._pushCwd(parsed.cwd);
+                    this._cwdFailCount = 0;
+                }
+            };
             this._getTtyCWD = tty => {
                 return new Promise((resolve, reject) => {
                     let pid = tty._pid;
+                    if (process.platform === "win32" && this._winTerm) {
+                        if (tty._oscCwd) {
+                            resolve(tty._oscCwd);
+                            return;
+                        }
+                        if (tty._cwd) {
+                            resolve(tty._cwd);
+                            return;
+                        }
+                        reject(new Error("CWD pending (awaiting shell prompt)"));
+                        return;
+                    }
                     switch(require("os").type()) {
                         case "Linux":
                             require("fs").readlink(`/proc/${pid}/cwd`, (e, cwd) => {
@@ -478,6 +514,10 @@ class Terminal {
             this._getTtyProcess = tty => {
                 return new Promise((resolve, reject) => {
                     let pid = tty._pid;
+                    if (process.platform === "win32" && this._winTerm) {
+                        this._winTerm.getWindowsChildProcess(pid).then(resolve).catch(reject);
+                        return;
+                    }
                     switch(require("os").type()) {
                         case "Linux":
                         case "Darwin":
@@ -500,25 +540,27 @@ class Terminal {
                 if (this._nextTickUpdateTtyCWD && this._disableCWDtracking === false) {
                     this._nextTickUpdateTtyCWD = false;
                     this._getTtyCWD(this.tty).then(cwd => {
-                        if (this.tty._cwd === cwd) return;
-                        this.tty._cwd = cwd;
-                        if (this.renderer) {
-                            this.renderer.send("terminal_channel-"+this.port, "New cwd", cwd);
-                        }
+                        this._cwdFailCount = 0;
+                        this._pushCwd(cwd);
                     }).catch(e => {
                         if (!this._closed) {
-                            console.log("Error while tracking TTY working directory: ", e);
-                            this._disableCWDtracking = true;
-                            try {
-                                this.renderer.send("terminal_channel-"+this.port, "Fallback cwd", opts.cwd || process.env.PWD);
-                            } catch(e) {
-                                // renderer closed
+                            this._cwdFailCount++;
+                            if (this._cwdFailCount === 1) {
+                                console.log("Error while tracking TTY working directory: ", e);
+                            }
+                            if (process.platform !== "win32" || this._cwdFailCount >= 5) {
+                                this._disableCWDtracking = true;
+                                try {
+                                    this.renderer.send("terminal_channel-"+this.port, "Fallback cwd", opts.cwd || process.env.PWD || process.env.USERPROFILE);
+                                } catch(err) {
+                                    // renderer closed
+                                }
                             }
                         }
                     });
                 }
 
-                if (this.renderer && this._nextTickUpdateProcess) {
+                if (this.renderer && this._nextTickUpdateProcess && this._disableProcessTracking === false) {
                     this._nextTickUpdateProcess = false;
                     this._getTtyProcess(this.tty).then(process => {
                         if (this.tty._process === process) return;
@@ -528,18 +570,30 @@ class Terminal {
                         }
                     }).catch(e => {
                         if (!this._closed) {
-                            console.log("Error while retrieving TTY subprocess: ", e);
-                            try {
-                                this.renderer.send("terminal_channel-"+this.port, "New process", "");
-                            } catch(e) {
-                                // renderer closed
+                            this._processFailCount++;
+                            if (this._processFailCount === 1) {
+                                console.log("Error while retrieving TTY subprocess: ", e);
+                            }
+                            if (process.platform !== "win32" || this._processFailCount >= 5) {
+                                this._disableProcessTracking = true;
+                                try {
+                                    this.renderer.send("terminal_channel-"+this.port, "New process", "");
+                                } catch(err) {
+                                    // renderer closed
+                                }
                             }
                         }
                     });
                 }
             }, 1000);
 
-            this.tty = this.Pty.spawn(opts.shell || "bash", (opts.params.length > 0 ? opts.params : (process.platform === "win32" ? [] : ["--login"])), {
+            const spawnArgs = this._winTerm
+                ? this._winTerm.normalizeShellArgs(opts.shell || "bash", opts.params)
+                : ((Array.isArray(opts.params) ? opts.params.length : (opts.params || "").length) > 0
+                    ? opts.params
+                    : (process.platform === "win32" ? [] : ["--login"]));
+
+            this.tty = this.Pty.spawn(opts.shell || "bash", spawnArgs, {
                 name: opts.env.TERM || "xterm-256color",
                 cols: 80,
                 rows: 24,
@@ -615,6 +669,7 @@ class Terminal {
                     this.tty.write(msg);
                 });
                 this.tty.onData(data => {
+                    this._parseOscFromData(data);
                     this._nextTickUpdateTtyCWD = true;
                     this._nextTickUpdateProcess = true;
                     try {

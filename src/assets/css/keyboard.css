@@ -44,9 +44,15 @@ section#keyboard.animation_state_1 > * {
     overflow: hidden;
 }
 
-section#keyboard.animation_state_2 > * {
+section#keyboard.animation_state_2 > *:not(#keyboard_fit_box) {
     filter: brightness(100%);
     width: 100vw;
+    overflow: hidden;
+}
+
+section#keyboard.animation_state_2 > #keyboard_fit_box {
+    filter: brightness(100%);
+    width: 100%;
     overflow: hidden;
 }
 
