@@ -5,8 +5,32 @@ const path = require("path");
 
 const OSC_BUFFER_MAX = 4096;
 
+function isInsideAsarArchive(filePath) {
+    return /app\.asar([\\/]|$)/i.test(filePath) && !/app\.asar\.unpacked/i.test(filePath);
+}
+
 function getShellIntegrationPath() {
-    return path.join(__dirname, "..", "assets", "scripts", "shellIntegration.ps1");
+    const relativeParts = ["assets", "scripts", "shellIntegration.ps1"];
+    const localPath = path.join(__dirname, "..", ...relativeParts);
+
+    if (process.resourcesPath) {
+        const unpackedPath = path.join(process.resourcesPath, "app.asar.unpacked", ...relativeParts);
+        if (fs.existsSync(unpackedPath)) {
+            return unpackedPath;
+        }
+    }
+    if (fs.existsSync(localPath) && !isInsideAsarArchive(localPath)) {
+        return localPath;
+    }
+
+    try {
+        const content = fs.readFileSync(localPath, "utf-8");
+        const tmp = path.join(os.tmpdir(), "syndex-shell-integration.ps1");
+        fs.writeFileSync(tmp, content, "utf-8");
+        return tmp;
+    } catch (_) {
+        return localPath;
+    }
 }
 
 function isPowerShell(shellPath) {

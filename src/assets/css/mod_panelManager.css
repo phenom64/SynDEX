@@ -180,12 +180,8 @@ body.syndex-layout section#keyboard.animation_state_2 > #keyboard_scale_inner {
     filter: brightness(100%);
 }
 
-body.syndex-layout section#keyboard div.keyboard_row {
+body.syndex-layout section#keyboard:not(.animation_state_1):not(.animation_state_2) div.keyboard_row {
     flex-shrink: 0;
-    width: auto !important;
-}
-
-body.syndex-layout section#keyboard.animation_state_2 > div.keyboard_row {
     width: auto !important;
 }
 

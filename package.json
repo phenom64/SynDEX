@@ -35,7 +35,7 @@
     "type": "git",
     "url": "git+https://github.com/phenom64/SynDEX.git"
   },
-  "author": "Gabriel 'Squared' SAILLARD <gabriel@saillard.dev> (https://gaby.dev)",
+  "author": "Syndromatic Ltd. <kavish@syndromatic.com> (https://syndromatic.com)",
   "license": "GPL-3.0",
   "bugs": {
     "url": "https://github.com/phenom64/SynDEX/issues"
@@ -46,8 +46,11 @@
     "productName": "SynDEX",
     "publish": "github",
     "asar": true,
+    "asarUnpack": [
+      "assets/scripts/shellIntegration.ps1"
+    ],
     "compression": "normal",
-    "copyright": "Copyright © 2017-2026 Gabriel 'Squared' SAILLARD <gabriel@saillard.dev> (https://gaby.dev)",
+    "copyright": "Copyright © 2026 Syndromatic Ltd. Designed by Kavish Krishnakumar in Manchester. Original project Copyright © 2017-2021 Gabriel 'Squared' SAILLARD",
     "directories": {
       "output": "dist",
       "app": "prebuild-src"
